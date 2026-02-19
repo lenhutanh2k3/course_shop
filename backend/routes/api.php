@@ -3,6 +3,7 @@ use App\Http\Controllers\AuthController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\CourseController;
+use App\Http\Controllers\CartController;
 
 //auth
 Route::post('/register',[AuthController::class, 'register']);
@@ -33,4 +34,13 @@ Route::middleware('auth:sanctum')->prefix('admin')->group(function () {
     Route::delete('/courses/{course}', [CourseController::class, 'destroy']);
     Route::post('/courses/{id}/restore', [CourseController::class, 'restore']);
     Route::delete('/courses/{id}/force', [CourseController::class, 'forceDelete']);
+});
+
+//cart
+Route::middleware('auth:sanctum')->group(function () {
+    Route::get('/cart', [CartController::class, 'index']);
+    Route::post('/cart/add', [CartController::class, 'add']);
+    Route::delete('/cart/{itemId}', [CartController::class, 'remove']);
+    Route::delete('/cart/clear/all', [CartController::class, 'clear']);
+
 });
