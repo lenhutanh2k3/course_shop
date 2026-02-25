@@ -14,14 +14,9 @@ class CartController extends Controller
 {
    use ApiResponse;
 
-    /**
-     * Lấy giỏ hàng hiện tại (public cho guest, protected cho user)
-     */
     public function index(Request $request)
     {
         $cart = $this->getOrCreateCart($request);
-
-        // Load items + course relation
         $cart->load('items.course');
 
         $items = $cart->items->map(function ($item) {
@@ -44,9 +39,6 @@ class CartController extends Controller
         ], 'Lấy giỏ hàng thành công');
     }
 
-    /**
-     * Thêm khóa học vào giỏ
-     */
     public function add(Request $request)
     {
         $request->validate([
@@ -64,32 +56,63 @@ class CartController extends Controller
             return $this->errorResponse('Khóa học này đã có trong giỏ hàng', null, 400);
         }
 
-        // Thêm item mới
         $cart->items()->create([
             'course_id'     => $course->id,
             'quantity'      => 1,
-            'price_at_add'  => $course->discounted_price,  // Lưu giá giảm tại thời điểm thêm
+            'price_at_add'  => $course->discounted_price,
         ]);
 
         return $this->successResponse(null, 'Đã thêm khóa học vào giỏ hàng');
     }
 
-    /**
-     * Xóa một item khỏi giỏ
-     */
-    public function remove(Request $request, $itemId)
+    public function sync(Request $request)
     {
-        $item = CartItem::findOrFail($itemId);
+        $request->validate([
+            'course_ids' => 'array',
+            'course_ids.*' => 'exists:courses,id',
+        ]);
 
-        $cart = $item->cart;
+        $cart = $this->getOrCreateCart($request);
+        $localCourseIds = $request->input('course_ids', []);
 
-        // Kiểm tra quyền sở hữu giỏ
-        if ($cart->user_id && $cart->user_id !== Auth::id()) {
-            return $this->errorResponse('Không có quyền xóa item này', null, 403);
+        foreach ($localCourseIds as $courseId) {
+            $existingItem = $cart->items()->where('course_id', $courseId)->first();
+            if (!$existingItem) {
+                $course = Course::find($courseId);
+                if ($course) {
+                    $cart->items()->create([
+                        'course_id' => $course->id,
+                        'quantity' => 1,
+                        'price_at_add' => $course->discounted_price,
+                    ]);
+                }
+            }
         }
 
-        if (!$cart->user_id && $cart->session_id !== session()->getId()) {
-            return $this->errorResponse('Không có quyền xóa item này', null, 403);
+        // Return updated cart
+        $cart->load('items.course');
+        $items = $cart->items->map(function ($item) {
+            return [
+                'id' => $item->id,
+                'course' => new CourseResource($item->course),
+                'quantity' => $item->quantity,
+            ];
+        });
+
+        return $this->successResponse([
+            'cart_id' => $cart->id,
+            'items' => $items,
+        ], 'Đồng bộ giỏ hàng thành công');
+    }
+
+    public function remove(Request $request, $courseId)
+    {
+        $cart = $this->getOrCreateCart($request);
+
+        $item = $cart->items()->where('course_id', $courseId)->first();
+
+        if (!$item) {
+            return $this->errorResponse('Không tìm thấy khóa học trong giỏ hàng', null, 404);
         }
 
         $item->delete();
@@ -97,9 +120,6 @@ class CartController extends Controller
         return $this->successResponse(null, 'Đã xóa khóa học khỏi giỏ hàng');
     }
 
-    /**
-     * Xóa toàn bộ giỏ hàng (clear cart)
-     */
     public function clear(Request $request)
     {
         $cart = $this->getOrCreateCart($request);
@@ -108,22 +128,17 @@ class CartController extends Controller
         return $this->successResponse(null, 'Đã xóa toàn bộ giỏ hàng');
     }
 
-    /**
-     * Helper: Lấy hoặc tạo giỏ hàng mới
-     */
     private function getOrCreateCart(Request $request)
     {
         $user = Auth::user();
 
         if ($user) {
-            // User login: tìm hoặc tạo giỏ theo user_id
             return Cart::firstOrCreate(
                 ['user_id' => $user->id],
                 ['session_id' => session()->getId()]
             );
         }
 
-        // Guest: dùng session_id
         return Cart::firstOrCreate(
             ['session_id' => session()->getId()],
             ['user_id' => null]
