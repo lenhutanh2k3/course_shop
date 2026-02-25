@@ -30,6 +30,11 @@ class Course extends Model
         return $this->belongsTo(Category::class);
     }
 
+    public function wishlistedBy()
+    {
+        return $this->belongsToMany(User::class, 'wishlists')->withTimestamps();
+    }
+
     public function getDiscountPercentage()
     {
         if ($this->original_price <= 0) return 0;

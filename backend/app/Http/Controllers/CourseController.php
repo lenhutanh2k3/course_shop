@@ -12,17 +12,16 @@ use App\Models\Category;
 use App\Traits\ApiResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Storage;
 
 class CourseController extends Controller
 {
     use ApiResponse;
 
-    // Public: Danh sách khóa học
     public function index(Request $request)
     {
         $query = Course::where('is_published', true)->with('category');
 
-        // Search theo title
         if ($request->filled('search')) {
             $query->where('title', 'like', '%' . $request->input('search') . '%');
         }
@@ -35,12 +34,48 @@ class CourseController extends Controller
             }
         }
 
-        // Sort theo discount cao nhất
-        if ($request->input('sort') === 'discount_desc') {
-            $query->orderByRaw('(original_price - discounted_price) / original_price DESC');
+        if ($request->filled('price_range')) {
+            $priceRange = $request->input('price_range');
+            switch ($priceRange) {
+                case 'free':
+                    $query->where('discounted_price', 0);
+                    break;
+                case 'under_100k':
+                    $query->where('discounted_price', '>', 0)->where('discounted_price', '<', 100000);
+                    break;
+                case '100k_500k':
+                    $query->whereBetween('discounted_price', [100000, 500000]);
+                    break;
+                case '500k_1m':
+                    $query->whereBetween('discounted_price', [500000, 1000000]);
+                    break;
+                case 'over_1m':
+                    $query->where('discounted_price', '>', 1000000);
+                    break;
+            }
         }
 
-        $courses = $query->paginate(12);
+        $sort = $request->input('sort', 'latest');
+        switch ($sort) {
+            case 'price_asc':
+                $query->orderBy('discounted_price', 'asc');
+                break;
+            case 'price_desc':
+                $query->orderBy('discounted_price', 'desc');
+                break;
+            case 'discount_desc':
+                $query->orderByRaw('(original_price - discounted_price) / original_price DESC');
+                break;
+            case 'oldest':
+                $query->orderBy('created_at', 'asc');
+                break;
+            case 'latest':
+            default:
+                $query->orderBy('created_at', 'desc');
+                break;
+        }
+
+        $courses = $query->paginate(9);
 
         return $this->successResponse(
             new CourseCollection($courses),
@@ -48,7 +83,24 @@ class CourseController extends Controller
         );
     }
 
-    // Public: Chi tiết khóa học
+    public function adminIndex()
+    {
+        $courses = Course::with('category')->latest()->get();
+        return $this->successResponse(
+            $courses,
+            'Lấy danh sách khóa học thành công'
+        );
+    }
+
+    public function trashed()
+    {
+        $courses = Course::onlyTrashed()->with('category')->latest()->get();
+        return $this->successResponse(
+            $courses,
+            'Lấy danh sách khóa học đã xóa thành công'
+        );
+    }
+
     public function show($slug)
     {
         $course = Course::where('slug', $slug)
@@ -62,15 +114,19 @@ class CourseController extends Controller
         );
     }
 
-    // Admin: Tạo mới
     public function store(StoreCourseRequest $request)
     {
         $validated = $request->validated();
 
-        // Tạo slug nếu chưa có
+        if ($request->hasFile('image')) {
+            $file = $request->file('image');
+            $filename = time() . '_' . Str::random(10) . '.' . $file->getClientOriginalExtension();
+            $path = $file->storeAs('courses', $filename, 'public');
+            $validated['image_url'] = url('/storage/' . $path);
+        }
+        
         $validated['slug'] = $validated['slug'] ?? Str::slug($validated['title']);
 
-        // Đảm bảo slug unique (thêm số nếu trùng)
         $originalSlug = $validated['slug'];
         $count = 1;
         while (Course::where('slug', $validated['slug'])->exists()) {
@@ -86,16 +142,20 @@ class CourseController extends Controller
         );
     }
 
-    // Admin: Cập nhật
     public function update(UpdateCourseRequest $request, Course $course)
     {
         $validated = $request->validated();
 
-        // Tạo slug mới nếu title thay đổi
+        if ($request->hasFile('image')) {
+            $file = $request->file('image');
+            $filename = time() . '_' . Str::random(10) . '.' . $file->getClientOriginalExtension();
+            $path = $file->storeAs('courses', $filename, 'public');
+            $validated['image_url'] = url('/storage/' . $path);
+        }
+
         if (isset($validated['title'])) {
             $validated['slug'] = Str::slug($validated['title']);
 
-            // Kiểm tra unique slug (loại trừ bản thân)
             $originalSlug = $validated['slug'];
             $count = 1;
             while (Course::where('slug', $validated['slug'])->where('id', '!=', $course->id)->exists()) {
@@ -111,7 +171,6 @@ class CourseController extends Controller
         );
     }
 
-    // Admin: Soft delete
     public function destroy(Course $course)
     {
         $course->delete();
@@ -122,7 +181,6 @@ class CourseController extends Controller
         );
     }
 
-    // Admin: Khôi phục
     public function restore($id)
     {
         $course = Course::withTrashed()->findOrFail($id);
@@ -139,7 +197,6 @@ class CourseController extends Controller
         );
     }
 
-    // Admin: Force delete
     public function forceDelete($id)
     {
         $course = Course::withTrashed()->findOrFail($id);

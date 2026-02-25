@@ -16,7 +16,7 @@ class CourseCollection extends ResourceCollection
     public function toArray(Request $request): array
     {
         return [
-            CourseResource::collection($this->collection),
+            'courses'       => CourseResource::collection($this->collection),
             'pagination'    => [
                 'current_page' => $this->currentPage(),
                 'last_page'    => $this->lastPage(),
