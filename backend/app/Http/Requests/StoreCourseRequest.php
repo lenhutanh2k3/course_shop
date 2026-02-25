@@ -28,8 +28,9 @@ class StoreCourseRequest extends FormRequest
             'original_price'     => 'required|numeric|min:0',
             'discounted_price'   => 'required|numeric|min:0|lte:original_price',
             'category_id'        => 'required|exists:categories,id',
-            'image_url'          => 'nullable|url',
-            'download_file_path' => 'nullable|string',
+            'image_url'          => 'nullable|string',
+            'image'              => 'nullable|image|max:10240', // 10MB
+            'download_file_path' => 'required|string',
             'download_file_name' => 'nullable|string',
             'is_published'       => 'boolean',
         ];
